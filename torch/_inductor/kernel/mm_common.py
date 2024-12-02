@@ -122,7 +122,7 @@ def filtered_configs(
         if extra_args is not None:
             group_m = extra_args.get("GROUP_M", 8)
             if torch.version.hip:
-                waves_per_eu = extra_args.get("waves_per_eu", 0)
+                waves_per_eu = extra_args.get("wpeu", 0)
         else:
             group_m = 8  # Default for NV
 

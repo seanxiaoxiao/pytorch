@@ -2,7 +2,7 @@
 import functools
 import itertools
 import logging
-from typing import cast, Sequence, Tuple
+from typing import cast, Sequence, Tuple, Optional, Dict, Any, List
 
 import sympy
 
@@ -19,6 +19,29 @@ from ..utils import ceildiv as cdiv, get_backend_num_stages
 
 log = logging.getLogger(__name__)
 
+def _extract_configs(
+    configs: List[Dict[str, Any]]
+) -> Tuple[List[Tuple[int, int, int, int, int]], List[Optional[Dict[str, Any]]]]:
+    """
+    Extracts platform configs and additional arguments if present, filtering by "cond".
+
+    Args:
+        configs (List[Dict[str, Any]]): List of configuration dictionaries. Each dictionary must have a "config" key
+                                         and an optional "cond" key.
+
+    Returns:
+        Tuple[List[Tuple[int, int, int, int, int]], List[Optional[Dict[str, Any]]]]:
+            A tuple containing two lists:
+              - base_configs: List of base configurations as tuples.
+              - extra_args: List of extra arguments (or None if no extra args exist).
+    """
+    base_configs = []
+    extra_args = []
+    for config in configs:
+        if config.get("cond", False):
+            base_configs.append(cast(Tuple[int, int, int, int, int], config["config"]))
+            extra_args.append({k: v for k, v in config.items() if k not in {"config", "cond"}} or None)
+    return base_configs, extra_args
 
 def triton_config(num_stages, num_warps, **kwargs):
     from triton import Config
@@ -78,7 +101,7 @@ def filtered_configs(
     )
     used = set()
 
-    for (block_m, block_n, block_k, num_stages, num_warps) in zip(configs, extra_args):
+    for (block_m, block_n, block_k, num_stages, num_warps), extra_args in zip(configs, extra_args):
         # shrink configs for small sizes
         block_m = max(min(int(block_m * scale), m), min_block_size)
         block_n = max(min(int(block_n * scale), n), min_block_size)
@@ -91,10 +114,10 @@ def filtered_configs(
         num_warps = min(num_warps, block_m * block_n // 256)
         
         
-        if extra_config is not None:
-            group_m = extra_config.get("GROUP_M", 8)
+        if extra_args is not None:
+            group_m = extra_args.get("GROUP_M", 8)
             if torch.version.hip:
-                waves_per_eu = extra_config("waves_per_eu", 0)
+                waves_per_eu = extra_args.get("waves_per_eu", 0)
         else:
             group_m = 8  # Default for NV 
         
@@ -115,7 +138,7 @@ def filtered_configs(
                 block_k,
                 num_stages,
                 num_warps,
-                group_m
+                group_m,
                 matrix_instr_nonkdim,
                 kpack,
                 waves_per_eu,
@@ -139,7 +162,7 @@ def filtered_configs(
                     BLOCK_K=block_k,
                     num_stages=num_stages,
                     num_warps=num_warps,
-                    GROUP_M=group_m
+                    GROUP_M=group_m,
                     matrix_instr_nonkdim=matrix_instr_nonkdim,
                     kpack=kpack,
                     waves_per_eu=waves_per_eu
@@ -198,58 +221,57 @@ else:
     if inductor_config.max_autotune_gemm_search_space != "EXHAUSTIVE":
         mm_kernel_configs = (
             [
-                {"config": (128, 128, 32, 4, rocm_num_stages), "GROUP_M": 16, "wpeu": 0, "cond": True},
-                {"config": (128, 128, 32, 4, rocm_num_stages), "GROUP_M": 16, "wpeu": 2, "cond": True},
-                {"config": (128, 128, 32, 8, rocm_num_stages), "GROUP_M": 16, "wpeu": 0, "cond": True},
-                {"config": (128, 128, 32, 4, rocm_num_stages), "GROUP_M": 4, "wpeu": 2, "cond": True},
-                {"config": (128, 128, 64, 4, rocm_num_stages), "GROUP_M": 16, "wpeu": 0, "cond": True},
-                {"config": (128, 128, 64, 4, rocm_num_stages), "GROUP_M": 16, "wpeu": 2, "cond": True},
-                {"config": (128, 128, 64, 8, rocm_num_stages), "GROUP_M": 16, "wpeu": 0, "cond": True},
-                {"config": (128, 128, 64, 4, rocm_num_stages), "GROUP_M": 4, "wpeu": 2, "cond": True},
-                {"config": (128, 128, 64, 8, rocm_num_stages), "GROUP_M": 4, "wpeu": 0, "cond": True},
-                {"config": (128, 128, 64, 4, rocm_num_stages), "GROUP_M": 8, "wpeu": 2, "cond": True},
-                {"config": (128, 128, 64, 8, rocm_num_stages), "GROUP_M": 8, "wpeu": 0, "cond": True},
-                {"config": (128, 256, 32, 4, rocm_num_stages), "GROUP_M": 16, "wpeu": 2, "cond": True},
-                {"config": (128, 64, 16, 4, rocm_num_stages), "GROUP_M": 16, "wpeu": 0, "cond": True},
-                {"config": (128, 64, 32, 8, rocm_num_stages), "GROUP_M": 16, "wpeu": 0, "cond": True},
-                {"config": (128, 64, 32, 4, rocm_num_stages), "GROUP_M": 8, "wpeu": 2, "cond": True},
-                {"config": (128, 64, 64, 4, rocm_num_stages), "GROUP_M": 16, "wpeu": 0, "cond": True},
-                {"config": (128, 64, 64, 4, rocm_num_stages), "GROUP_M": 4, "wpeu": 0, "cond": True},
-                {"config": (128, 64, 64, 4, rocm_num_stages), "GROUP_M": 8, "wpeu": 0, "cond": True},
-                {"config": (128, 64, 64, 8, rocm_num_stages), "GROUP_M": 8, "wpeu": 0, "cond": True},
-                {"config": (16, 16, 256, 4, rocm_num_stages), "GROUP_M": 4, "wpeu": 2, "cond": True},
-                {"config": (16, 16, 256, 4, rocm_num_stages), "GROUP_M": 8, "wpeu": 2, "cond": True},
-                {"config": (256, 128, 32, 8, rocm_num_stages), "GROUP_M": 16, "wpeu": 0, "cond": True},
-                {"config": (256, 128, 32, 4, rocm_num_stages), "GROUP_M": 4, "wpeu": 2, "cond": True},
-                {"config": (32, 16, 256, 4, rocm_num_stages), "GROUP_M": 4, "wpeu": 0, "cond": True},
-                {"config": (32, 32, 128, 4, rocm_num_stages), "GROUP_M": 8, "wpeu": 0, "cond": True},
-                {"config": (32, 64, 128, 4, rocm_num_stages), "GROUP_M": 8, "wpeu": 0, "cond": True},
-                {"config": (32, 64, 64, 4, rocm_num_stages), "GROUP_M": 16, "wpeu": 0, "cond": True},
-                {"config": (32, 64, 64, 4, rocm_num_stages), "GROUP_M": 8, "wpeu": 0, "cond": True},
-                {"config": (64, 128, 32, 4, rocm_num_stages), "GROUP_M": 16, "wpeu": 0, "cond": True},
-                {"config": (64, 128, 32, 4, rocm_num_stages), "GROUP_M": 4, "wpeu": 2, "cond": True},
-                {"config": (64, 128, 32, 8, rocm_num_stages), "GROUP_M": 4, "wpeu": 0, "cond": True},
-                {"config": (64, 128, 32, 4, rocm_num_stages), "GROUP_M": 8, "wpeu": 2, "cond": True},
-                {"config": (64, 128, 32, 8, rocm_num_stages), "GROUP_M": 8, "wpeu": 0, "cond": True},
-                {"config": (64, 128, 64, 4, rocm_num_stages), "GROUP_M": 16, "wpeu": 2, "cond": True},
-                {"config": (64, 16, 128, 4, rocm_num_stages), "GROUP_M": 16, "wpeu": 2, "cond": True},
-                {"config": (64, 16, 128, 4, rocm_num_stages), "GROUP_M": 8, "wpeu": 2, "cond": True},
-                {"config": (64, 16, 64, 4, rocm_num_stages), "GROUP_M": 8, "wpeu": 2, "cond": True},
-                {"config": (64, 64, 64, 4, rocm_num_stages), "GROUP_M": 16, "wpeu": 0, "cond": True},
-                {"config": (64, 64, 64, 4, rocm_num_stages), "GROUP_M": 4, "wpeu": 0, "cond": True},
+                {"config": (128, 128, 32, rocm_num_stages, 4), "GROUP_M": 16, "wpeu": 0, "cond": True},
+                {"config": (128, 128, 32, rocm_num_stages, 4), "GROUP_M": 16, "wpeu": 2, "cond": True},
+                {"config": (128, 128, 32, rocm_num_stages, 8), "GROUP_M": 16, "wpeu": 0, "cond": True},
+                {"config": (128, 128, 32, rocm_num_stages, 4), "GROUP_M": 4, "wpeu": 2, "cond": True},
+                {"config": (128, 128, 64, rocm_num_stages, 4), "GROUP_M": 16, "wpeu": 0, "cond": True},
+                {"config": (128, 128, 64, rocm_num_stages, 4), "GROUP_M": 16, "wpeu": 2, "cond": True},
+                {"config": (128, 128, 64, rocm_num_stages, 8), "GROUP_M": 16, "wpeu": 0, "cond": True},
+                {"config": (128, 128, 64, rocm_num_stages, 4), "GROUP_M": 4, "wpeu": 2, "cond": True},
+                {"config": (128, 128, 64, rocm_num_stages, 8), "GROUP_M": 4, "wpeu": 0, "cond": True},
+                {"config": (128, 128, 64, rocm_num_stages, 4), "GROUP_M": 8, "wpeu": 2, "cond": True},
+                {"config": (128, 128, 64, rocm_num_stages, 8), "GROUP_M": 8, "wpeu": 0, "cond": True},
+                {"config": (128, 256, 32, rocm_num_stages, 4), "GROUP_M": 16, "wpeu": 2, "cond": True},
+                {"config": (128, 64, 16, rocm_num_stages, 4), "GROUP_M": 16, "wpeu": 0, "cond": True},
+                {"config": (128, 64, 32, rocm_num_stages, 8), "GROUP_M": 16, "wpeu": 0, "cond": True},
+                {"config": (128, 64, 32, rocm_num_stages, 4), "GROUP_M": 8, "wpeu": 2, "cond": True},
+                {"config": (128, 64, 64, rocm_num_stages, 4), "GROUP_M": 16, "wpeu": 0, "cond": True},
+                {"config": (128, 64, 64, rocm_num_stages, 4), "GROUP_M": 4, "wpeu": 0, "cond": True},
+                {"config": (128, 64, 64, rocm_num_stages, 4), "GROUP_M": 8, "wpeu": 0, "cond": True},
+                {"config": (128, 64, 64, rocm_num_stages, 8), "GROUP_M": 8, "wpeu": 0, "cond": True},
+                {"config": (16, 16, 256, rocm_num_stages, 4), "GROUP_M": 4, "wpeu": 2, "cond": True},
+                {"config": (16, 16, 256, rocm_num_stages, 4), "GROUP_M": 8, "wpeu": 2, "cond": True},
+                {"config": (256, 128, 32, rocm_num_stages, 8), "GROUP_M": 16, "wpeu": 0, "cond": True},
+                {"config": (256, 128, 32, rocm_num_stages, 4), "GROUP_M": 4, "wpeu": 2, "cond": True},
+                {"config": (32, 16, 256, rocm_num_stages, 4), "GROUP_M": 4, "wpeu": 0, "cond": True},
+                {"config": (32, 32, 128, rocm_num_stages, 4), "GROUP_M": 8, "wpeu": 0, "cond": True},
+                {"config": (32, 64, 128, rocm_num_stages, 4), "GROUP_M": 8, "wpeu": 0, "cond": True},
+                {"config": (32, 64, 64, rocm_num_stages, 4), "GROUP_M": 16, "wpeu": 0, "cond": True},
+                {"config": (32, 64, 64, rocm_num_stages, 4), "GROUP_M": 8, "wpeu": 0, "cond": True},
+                {"config": (64, 128, 32, rocm_num_stages, 4), "GROUP_M": 16, "wpeu": 0, "cond": True},
+                {"config": (64, 128, 32, rocm_num_stages, 4), "GROUP_M": 4, "wpeu": 2, "cond": True},
+                {"config": (64, 128, 32, rocm_num_stages, 8), "GROUP_M": 4, "wpeu": 0, "cond": True},
+                {"config": (64, 128, 32, rocm_num_stages, 4), "GROUP_M": 8, "wpeu": 2, "cond": True},
+                {"config": (64, 128, 32, rocm_num_stages, 8), "GROUP_M": 8, "wpeu": 0, "cond": True},
+                {"config": (64, 128, 64, rocm_num_stages, 4), "GROUP_M": 16, "wpeu": 2, "cond": True},
+                {"config": (64, 16, 128, rocm_num_stages, 4), "GROUP_M": 16, "wpeu": 2, "cond": True},
+                {"config": (64, 16, 128, rocm_num_stages, 4), "GROUP_M": 8, "wpeu": 2, "cond": True},
+                {"config": (64, 16, 64, rocm_num_stages, 4), "GROUP_M": 8, "wpeu": 2, "cond": True},
+                {"config": (64, 64, 64, rocm_num_stages, 4), "GROUP_M": 16, "wpeu": 0, "cond": True},
+                {"config": (64, 64, 64, rocm_num_stages, 4), "GROUP_M": 4, "wpeu": 0, "cond": True},
             ]
         )
-        if inductor_config.max_autotune_gemm_search_space != "EXHAUSTIVE"
-        else [
-            {"config": (BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps)}
-            for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
-                [16, 32, 64, 128, 256], repeat=3
-            )
-            for num_stages in [2]
-            for num_warps in [4, 8]
-            for waves_per_eu in [0, 2]
-            for GROUP_M in [4, 8, 16]
-        ]
+    else: [
+        {"config": (BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps)}
+        for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
+            [16, 32, 64, 128, 256], repeat=3
+        )
+        for num_stages in [2]
+        for num_warps in [4, 8]
+        for waves_per_eu in [0, 2]
+        for GROUP_M in [4, 8, 16]
+    ]
 
 
 # these are only used in tuned_mm when AutoHeuristic is enabled
@@ -401,17 +423,17 @@ scaled_mm_kernel_configs = [
 
 # Create filtered list of configs based on cond evaluation
 # and parse other params as extra_args
-mm_platform_configs, mm_args = extract_configs(mm_kernel_configs)
-extra_mm_platform_configs, extra_mm_args = extract_configs(mm_kernel_configs)
-int8_mm_platform_configs, int8_mm_args = extract_configs(mm_kernel_configs)
-mixed_mm_platform_configs, mixed_mm_args = extract_configs(mm_kernel_configs)
-scaled_mm_platform_configs, scaled_mm_args = extract_configs(mm_kernel_configs)
+mm_platform_configs, mm_args = _extract_configs(mm_kernel_configs)
+extra_mm_platform_configs, extra_mm_args = _extract_configs(mm_kernel_configs)
+int8_mm_platform_configs, int8_mm_args = _extract_configs(mm_kernel_configs)
+mixed_mm_platform_configs, mixed_mm_args = _extract_configs(mm_kernel_configs)
+scaled_mm_platform_configs, scaled_mm_args = _extract_configs(mm_kernel_configs)
 
 # On ROCm convert num_stages to improve performance
 # This can be removed when ROCm specific implementations introduced
 if torch.version.hip:
     extra_mm_configs = build_rocm_gemm_configs(extra_mm_platform_configs)
-    int8_configs = build_rocm_gemm_configs(int8_platform_configs)
+    int8_mm_configs = build_rocm_gemm_configs(int8_mm_platform_configs)
     mixed_mm_configs = build_rocm_gemm_configs(mixed_mm_platform_configs)
     scaled_mm_configs = build_rocm_gemm_configs(scaled_mm_platform_configs)
 
@@ -429,7 +451,7 @@ extra_mm_configs = functools.partial(
 
 int8_mm_configs = functools.partial(
     filtered_configs,
-    configs=int8_platform_configs,
+    configs=int8_mm_platform_configs,
     extra_args=int8_mm_args,
 
 )
@@ -536,29 +558,6 @@ def addmm_epilogue(dtype, alpha, beta):
 
     return epilogue
 
-def _extract_configs(
-    configs: List[Dict[str, Any]]
-) -> Tuple[List[Tuple[int, int, int, int, int]], List[Optional[Dict[str, Any]]]]:
-    """
-    Extracts platform configs and additional arguments if present, filtering by "cond".
-
-    Args:
-        configs (List[Dict[str, Any]]): List of configuration dictionaries. Each dictionary must have a "config" key
-                                         and an optional "cond" key.
-
-    Returns:
-        Tuple[List[Tuple[int, int, int, int, int]], List[Optional[Dict[str, Any]]]]:
-            A tuple containing two lists:
-              - base_configs: List of base configurations as tuples.
-              - extra_args: List of extra arguments (or None if no extra args exist).
-    """
-    base_configs = []
-    extra_args = []
-    for config in configs:
-        if config.get("cond", False):
-            base_configs.append(cast(Tuple[int, int, int, int, int], config["config"]))
-            extra_args.append({k: v for k, v in config.items() if k not in {"config", "cond"}} or None)
-    return base_configs, extra_args
 
 def _is_static_problem(layout: Layout) -> Tuple[bool, bool]:
     """

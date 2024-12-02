@@ -340,15 +340,13 @@ class TritonTemplateKernel(TritonKernel):
         triton_meta["configs"] = [config_of(signature)]
         for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index]
-        matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", 0)
-        waves_per_eu = self.meta.get("waves_per_eu", 0)
-        kpack = self.meta.get("kpack", 1)
-
-        if matrix_instr_nonkdim != 0:
+        
+        if torch.version.hip:
+            matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", 0)
+            waves_per_eu = self.meta.get("waves_per_eu", 0)
+            kpack = self.meta.get("kpack", 1) 
             triton_meta["matrix_instr_nonkdim"] = matrix_instr_nonkdim
-        if waves_per_eu != 0:
             triton_meta["waves_per_eu"] = waves_per_eu
-        if kpack != 0:
             triton_meta["kpack"] = kpack
 
         self.triton_meta = triton_meta
@@ -927,7 +925,7 @@ class TritonTemplate(KernelTemplate):
                 ),
                 "num_stages": num_stages,
                 "num_warps": num_warps,
-                "GROUP_M": kwargs.get("GROUP_M", -1)
+                "GROUP_M": kwargs.get("GROUP_M", -1),
                 "allow_tf32": str(kwargs.get("ALLOW_TF32", None)),
                 "acc_type": str(kwargs.get("ACC_TYPE", None)),
             },

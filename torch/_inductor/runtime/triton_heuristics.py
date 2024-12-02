@@ -482,7 +482,7 @@ class CachingAutotuner(KernelInterface):
                         "matrix_instr_nonkdim"
                     ]
                 if "kpack" in compile_meta:
-                    options["kpack" = compile_meta[
+                    options["kpack"] = compile_meta[
                         "kpack"
                     ]
             compile_kwargs = {

@@ -24,27 +24,25 @@ def _extract_configs(
     configs: List[Dict[str, Any]]
 ) -> Tuple[List[Tuple[int, int, int, int, int]], List[Optional[Dict[str, Any]]]]:
     """
-    Extracts platform configs and additional arguments if present, filtering by "cond".
+    Extracts triton configs and additional arguments if present filtered by a condition
 
     Args:
         configs (List[Dict[str, Any]]): List of configuration dictionaries. Each dictionary must have a "config" key
                                          and an optional "cond" key.
-
     Returns:
         Tuple[List[Tuple[int, int, int, int, int]], List[Optional[Dict[str, Any]]]]:
             A tuple containing two lists:
-              - base_configs: List of base configurations as tuples.
-              - extra_args: List of extra arguments (or None if no extra args exist).
+              - trion_configs: List of base configurations as tuples.
+              - extra_args: List of extra arguments supplied with the triton config.
     """
-    base_configs = []
+    triton_configs = []
     extra_args = []
     for config in configs:
         if config.get("cond", False):
-            base_configs.append(cast(Tuple[int, int, int, int, int], config["config"]))
-            extra_args.append(
-                {k: v for k, v in config.items() if k not in {"config", "cond"}} or None
-            )
-    return base_configs, extra_args
+            triton_configs.append(cast(Tuple[int, int, int, int, int], config["config"]))
+            filtered_args = {k: v for k, v in config.items() if k not in {"config", "cond"}}
+            extra_args.append(filtered_args)
+    return triton_configs, extra_args
 
 
 def triton_config(num_stages, num_warps, **kwargs):
@@ -63,7 +61,7 @@ def filtered_configs(
     n: int,
     k: int,
     configs: Sequence[Tuple[int, int, int, int, int]],
-    extra_args: Sequence[Optional[Dict[str, Any]]] = None,
+    extra_args: Sequence[Optional[Dict[str, Any]]],
     has_int8_tensor=False,
     scale=1,
     exclude=lambda m, n, k: False,

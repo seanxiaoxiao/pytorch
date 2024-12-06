@@ -438,6 +438,13 @@ else:
                 "wpeu": 0,
                 "cond": True,
             },
+            {
+                "config": (32, 16, 128, rocm_num_stages, 4),
+                "GROUP_M": 8,
+                "wpeu": 0,
+                "cond": True,
+            },
+
         ]
     else:
         [

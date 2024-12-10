@@ -122,73 +122,65 @@ def filtered_configs(
 
         if extra_args:
             group_m = extra_args.get("GROUP_M", 8)
-        else:
-            group_m = 8  # Default for NV
-
-        if torch.version.hip:
-            matrix_instr_nonkdim = 16
-            kpack = 2
-            waves_per_eu = 0
-            
-            if extra_args:
+            if torch.version.hip:
+                kpack = extra_args.get("kpack", 2)
+                matrix_instr_nonkdim = extra_args.get("mfma_size", 16)
                 waves_per_eu = extra_args.get("wpeu", 0)
                 if waves_per_eu != 0:
                     waves_per_eu = int(8 // num_warps)
-
-            if matrix_instr_nonkdim != 0 and (
-                block_m % matrix_instr_nonkdim != 0
-                or block_n % matrix_instr_nonkdim != 0
-            ):
-                #  block_m and block_n must be a multiple of matrix_instr_nonkdim
-                matrix_instr_non_kdim = 0
-                kpack = 1
-                continue
-            if (
-                block_m,
-                block_n,
-                block_k,
-                num_stages,
-                num_warps,
-                group_m,
-                matrix_instr_nonkdim,
-                kpack,
-                waves_per_eu,
-            ) not in used:
-                used.add(
-                    (
-                        block_m,
-                        block_n,
-                        block_k,
-                        num_stages,
-                        num_warps,
-                        group_m,
-                        matrix_instr_nonkdim,
-                        kpack,
-                        waves_per_eu,
+                if matrix_instr_nonkdim != 0 and (
+                    block_m % matrix_instr_nonkdim != 0
+                    or block_n % matrix_instr_nonkdim != 0
+                ):
+                    #  block_m and block_n must be a multiple of matrix_instr_nonkdim
+                    matrix_instr_non_kdim = 0
+                    kpack = 1
+                if (
+                    block_m,
+                    block_n,
+                    block_k,
+                    num_stages,
+                    num_warps,
+                    group_m,
+                    matrix_instr_nonkdim,
+                    kpack,
+                    waves_per_eu,
+                ) not in used:
+                    used.add(
+                        (
+                            block_m,
+                            block_n,
+                            block_k,
+                            num_stages,
+                            num_warps,
+                            group_m,
+                            matrix_instr_nonkdim,
+                            kpack,
+                            waves_per_eu,
+                        )
                     )
-                )
-                yield triton_config(
-                    BLOCK_M=block_m,
-                    BLOCK_N=block_n,
-                    BLOCK_K=block_k,
-                    num_stages=num_stages,
-                    num_warps=num_warps,
-                    GROUP_M=group_m,
-                    matrix_instr_nonkdim=matrix_instr_nonkdim,
-                    kpack=kpack,
-                    waves_per_eu=waves_per_eu,
-                )
-        else:
-            if (block_m, block_n, block_k, num_stages, num_warps, 0) not in used:
-                used.add((block_m, block_n, block_k, num_stages, num_warps, 0))
-                yield triton_config(
-                    BLOCK_M=block_m,
-                    BLOCK_N=block_n,
-                    BLOCK_K=block_k,
-                    num_stages=num_stages,
-                    num_warps=num_warps,
-                    GROUP_M=group_m,
-                )
+                    yield triton_config(
+                        BLOCK_M=block_m,
+                        BLOCK_N=block_n,
+                        BLOCK_K=block_k,
+                        num_stages=num_stages,
+                        num_warps=num_warps,
+                        GROUP_M=group_m,
+                        matrix_instr_nonkdim=matrix_instr_nonkdim,
+                        kpack=kpack,
+                        waves_per_eu=waves_per_eu,
+                    )
+            else:
+                if (block_m, block_n, block_k, num_stages, num_warps, 0) not in used:
+                    used.add((block_m, block_n, block_k, num_stages, num_warps, 0))
+                    yield triton_config(
+                        BLOCK_M=block_m,
+                        BLOCK_N=block_n,
+                        BLOCK_K=block_k,
+                        num_stages=num_stages,
+                        num_warps=num_warps,
+                        GROUP_M=group_m,
+                    )
 
 
 # List of dictionaries to store the kernel configs. Configs that evaluate to true
@@ -407,6 +399,20 @@ else:
                 "cond": True,
             },
             {
+                "config": (128, 128, 64, rocm_num_stages, 4),
+                "GROUP_M": 8,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (128, 128, 64, rocm_num_stages, 4),
+                "GROUP_M": 8,
+                "wpeu": 0,
+                "mfma_size": 0,
+                "cond": True,
+            },
+
+            {
                 "config": (64, 64, 32, rocm_num_stages, 4),
                 "GROUP_M": 8,
                 "wpeu": 0,
@@ -442,11 +448,22 @@ else:
                 "wpeu": 0,
                 "cond": True,
             },
+            {
+                "config": (128, 32, 32, rocm_num_stages, 4),
+                "GROUP_M": 8,
+                "wpeu": 2,
+                "cond": True,
+            },
 
         ]
     else:
         [
-            {"config": (BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps)}
+            {
+                "config": (BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps),
+                "GROUP_M": GROUP_M,
+                "wpeu": waves_per_eu,
+                "cond": True,
+            }
             for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
                 [16, 32, 64, 128, 256], repeat=3
             )

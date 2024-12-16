@@ -221,7 +221,7 @@ if torch.version.hip is None:
     )
 else:
     rocm_num_stages = get_backend_num_stages()
-    if inductor_config.max_autotune_gemm_search_space != "EXHAUSTIVE"
+    if inductor_config.max_autotune_gemm_search_space != "EXHAUSTIVE":
         mm_kernel_configs = (
             [
                 {
@@ -455,29 +455,96 @@ else:
                     "wpeu": 2,
                     "cond": True,
                 },
+                {
+                    "config": (32, 256, 64, rocm_num_stages, 8),
+                    "GROUP_M": 8,
+                    "kpack": 1,
+                    "cond": True,
+                },
+                {
+                    "config": (64, 128, 64, rocm_num_stages, 8),
+                    "GROUP_M": 4,
+                    "kpack": 1,
+                    "cond": True,
+                },
+                {
+                    "config": (16, 64, 128, rocm_num_stages, 8),
+                    "GROUP_M": 8,
+                    "cond": True,
+                },
+                {
+                    "config": (128, 32, 16, rocm_num_stages, 4),
+                    "GROUP_M": 16,
+                    "kpack": 1,
+                    "wpeu": 2,
+                    "cond": True,
+                },
+                {
+                    "config": (128, 64, 128, rocm_num_stages, 4),
+                    "GROUP_M": 8,
+                    "kpack": 1,
+                    "cond": True,
+                },
+                {
+                    "config": (128, 32, 16, rocm_num_stages, 4),
+                    "GROUP_M": 16,
+                    "kpack": 1,
+                    "cond": True,
+                },
+                {
+                    "config": (64, 256, 64, rocm_num_stages, 8),
+                    "GROUP_M": 4,
+                    "kpack": 1,
+                    "mfma_size": 0,
+                    "cond": True,
+                },
+                {
+                    "config": (64, 256, 16, rocm_num_stages, 4),
+                    "GROUP_M": 4,
+                    "kpack": 1,
+                    "cond": True,
+                },
+                {
+                    "config": (64, 32, 32, rocm_num_stages, 4),
+                    "GROUP_M": 8,
+                    "kpack": 2,
+                    "mfma_size": 0,
+                    "cond": True,
+                },
+                {
+                    "config": (128, 128, 128, rocm_num_stages, 8),
+                    "GROUP_M": 4,
+                    "cond": True,
+                },
+                {
+                    "config": (64, 256, 32, rocm_num_stages, 8),
+                    "GROUP_M": 4,
+                    "cond": True,
+                },
             ]
-        else: 
-            mm_kernel_configs = (
-                [
-                    {
-                        "config": (BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps),
-                        "GROUP_M": GROUP_M,
-                        "wpeu": waves_per_eu,
-                        "mfma_size": matrix_instr_nonkdim,
-                        "kpack": kpack,
-                        "cond": True,
-                    }
-                    for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
-                        [16, 32, 64, 128, 256], repeat=3
-                    )
-                    for num_stages in [2]
-                    for num_warps in [4, 8]
-                    for waves_per_eu in [0, 2]
-                    for GROUP_M in [4, 8, 16]
-                    for matrix_instr_nonkdim in [0, 16]
-                    for kpack in [1, 2]
-                ]
-            )
+        )
+    else: 
+        mm_kernel_configs = (
+            [
+                {
+                    "config": (BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps),
+                    "GROUP_M": GROUP_M,
+                    "wpeu": waves_per_eu,
+                    "mfma_size": matrix_instr_nonkdim,
+                    "kpack": kpack,
+                    "cond": True,
+                }
+                for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
+                    [16, 32, 64, 128, 256], repeat=3
+                )
+                for num_stages in [2]
+                for num_warps in [4, 8]
+                for waves_per_eu in [0, 2]
+                for GROUP_M in [4, 8, 16]
+                for matrix_instr_nonkdim in [0, 16]
+                for kpack in [1, 2]
+            ]
+        )
 
 
 # these are only used in tuned_mm when AutoHeuristic is enabled

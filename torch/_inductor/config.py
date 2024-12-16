@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 import torch
 import torch._inductor.custom_graph_pass
 from torch._environment import is_fbcode
-from torch.utils._config_module import get_tristate_env, install_config_module
+from torch.utils._config_module import Config, get_tristate_env, install_config_module
 
 
 def fx_graph_remote_cache_default() -> Optional[bool]:
@@ -293,7 +293,7 @@ intra_node_bw = 300
 inter_node_bw = 25
 
 # enable slow autotuning passes to select algorithms
-max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
+max_autotune = Config(False, env_name_default="TORCHINDUCTOR_MAX_AUTOTUNE")
 
 # enable slow autotuning passes to select pointwise/reductions algorithms
 max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") == "1"
@@ -1380,3 +1380,15 @@ if TYPE_CHECKING:
 
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])
+
+# def _set_config_from_env(config, env) -> None:
+#     """
+#     Set config to True if env is set to 1.
+#     We use the if statement to avoid calling setattr if env is not set.
+#     This helps config.codegen_config() to only generate configs that are not
+#     the default value.
+#     """
+#     if os.environ.get(env) == "1":
+#         setattr(sys.modules[__name__], config, True)
+
+# _set_config_from_env("max_autotune", "TORCHINDUCTOR_MAX_AUTOTUNE")

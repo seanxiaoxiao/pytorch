@@ -421,6 +421,14 @@ def default_debug_dir_root():
     if DEBUG_DIR_VAR_NAME in os.environ:
         return os.path.join(os.environ[DEBUG_DIR_VAR_NAME], "torch_compile_debug")
     elif is_fbcode():
+        fbcode_dir = os.path.join(os.path.expanduser("~"), "fbsource", "fbcode")
+        from torch._inductor import config as inductor_config
+
+        if inductor_config.aot_inductor.dump_aoti_minifier and os.path.exists(
+            fbcode_dir
+        ):
+            # For AoTI minifier, we default to dump to fbcode dir internally
+            return fbcode_dir
         return os.path.join(
             tempfile.gettempdir(), getpass.getuser(), "torch_compile_debug"
         )

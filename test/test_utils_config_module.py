@@ -175,6 +175,15 @@ class TestConfigModule(TestCase):
             """torch.testing._internal.fake_config_module.e_bool = False
 torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""",
         )
+        code = config.codegen_config(env_default=True)
+        self.assertEqual(
+            code,
+            """torch.testing._internal.fake_config_module.e_bool = False
+torch.testing._internal.fake_config_module.e_env_default = True
+torch.testing._internal.fake_config_module.e_env_default_FALSE = False
+torch.testing._internal.fake_config_module.e_env_force = True
+torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""",
+        )
 
     def test_get_hash(self):
         hash_value = b"\xf2C\xdbo\x99qq\x12\x11\xf7\xb4\xeewVpZ"

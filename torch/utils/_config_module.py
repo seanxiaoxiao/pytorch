@@ -407,7 +407,28 @@ class ConfigModule(ModuleType):
         module, constant_name = data
         setattr(module, constant_name, val)
 
-    def _is_default(self, name: str) -> bool:
+    def _is_default(self, name: str, env: bool = False) -> bool:
+        """
+        If env=True, configs overriden by the env are not considered default.
+        """
+        if env:
+            config_val = self._config[name]
+            # The config is not overridden by the user, and the env_value_default
+            # is different from the default value (meaning user has set the env to
+            # change the default value).
+            not_set_env_default = (
+                config_val.env_value_default is _UNSET_SENTINEL
+                or config_val.env_value_default == config_val.default
+            )
+            not_set_env_force = (
+                config_val.env_value_force is _UNSET_SENTINEL
+                or config_val.env_value_force == config_val.default
+            )
+            return (
+                config_val.user_override is _UNSET_SENTINEL
+                and not_set_env_default
+                and not_set_env_force
+            )
         return self._config[name].user_override is _UNSET_SENTINEL
 
     def _get_dict(
@@ -415,6 +436,7 @@ class ConfigModule(ModuleType):
         ignored_keys: Optional[List[str]] = None,
         ignored_prefixes: Optional[List[str]] = None,
         skip_default: bool = False,
+        env_default: bool = False,
     ) -> Dict[str, Any]:
         """Export a dictionary of current configuration keys and values.
 
@@ -432,11 +454,12 @@ class ConfigModule(ModuleType):
             skip_default does two things. One if a key has not been modified
                 it skips it. The other is it modified the logging behaviour
                 to match what codegen already did for modified skipped keys
+            env_default: If set, configs overriden by the env are not considered default.
         """
         config: Dict[str, Any] = {}
         for key in self._config:
             if ignored_keys and key in ignored_keys:
-                if skip_default and not self._is_default(key):
+                if skip_default and not self._is_default(key, env=env_default):
                     warnings.warn(
                         f"Skipping serialization of {key} value {getattr(self, key)}"
                     )
@@ -444,7 +467,7 @@ class ConfigModule(ModuleType):
             if ignored_prefixes:
                 if any(key.startswith(prefix) for prefix in ignored_prefixes):
                     continue
-            if skip_default and self._is_default(key):
+            if skip_default and self._is_default(key, env=env_default):
                 continue
             if self._config[key].alias is not None:
                 continue
@@ -469,14 +492,16 @@ class ConfigModule(ModuleType):
         prefixes.extend(getattr(self, "_cache_config_ignore_prefix", []))
         return self._get_dict(ignored_prefixes=prefixes)
 
-    def codegen_config(self) -> str:
+    def codegen_config(self, env_default: bool = False) -> str:
         """Convert config to Python statements that replicate current config.
         This does NOT include config settings that are at default values.
         """
         lines = []
         mod = self.__name__
         for k, v in self._get_dict(
-            ignored_keys=getattr(self, "_save_config_ignore", []), skip_default=True
+            ignored_keys=getattr(self, "_save_config_ignore", []),
+            skip_default=True,
+            env_default=env_default,
         ).items():
             lines.append(f"{mod}.{k} = {v!r}")
         return "\n".join(lines)

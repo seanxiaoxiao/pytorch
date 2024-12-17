@@ -45,8 +45,14 @@ def _extract_configs(
     extra_args = []
     for config in configs:
         if config.get("cond", False):
-            triton_configs.append(cast(Tuple[int, int, int, int, int], config["config"]))
-            filtered_args = {k: v for k, v in config.items() if k not in {"config", "cond"}}
+            triton_configs.append(
+                cast(Tuple[int, int, int, int, int], config["config"])
+            )
+            filtered_args = {
+                k: v
+                for k, v in config.items()
+                if k not in OrderedSet(["config", "cond"])
+            }
             extra_args.append(filtered_args)
     return triton_configs, extra_args
 
@@ -113,7 +119,7 @@ def filtered_configs(
         ),
         min_block_size_k,
     )
-    used = set()
+    used = OrderedSet[tuple[int, int, int, int, int, int]]()
 
     for (block_m, block_n, block_k, num_stages, num_warps), extra_args in zip(
         configs, extra_args
@@ -129,6 +135,15 @@ def filtered_configs(
         # each warp computes 16x16 tile = 256
         num_warps = min(num_warps, block_m * block_n // 256)
 
+        # Default args
+        group_m = 8
+
+        if torch.version.hip:
+            kpack = 2
+            matrix_instr_nonkdim = 16
+            waves_per_eu = 0
+
+        # If extra args is specified then extract custom args for this triton configuration
         if extra_args:
             group_m = extra_args.get("GROUP_M", 8)
             if torch.version.hip:
@@ -144,56 +159,43 @@ def filtered_configs(
                     #  block_m and block_n must be a multiple of matrix_instr_nonkdim
                     matrix_instr_non_kdim = 0
                     kpack = 1
-                    
-          if torch.version.hip:
-              if (
-                    block_m,
-                    block_n,
-                    block_k,
-                    num_stages,
-                    num_warps,
-                    group_m,
-                    matrix_instr_nonkdim,
-                    kpack,
-                    waves_per_eu,
-                ) not in used and (
-                    max_mm_configs is None or len(used) < max_mm_configs
-                ):
-                    used.add(
-                        (
-                            block_m,
-                            block_n,
-                            block_k,
-                            num_stages,
-                            num_warps,
-                            group_m,
-                            matrix_instr_nonkdim,
-                            kpack,
-                            waves_per_eu,
-                        )
+
+        if torch.version.hip:
+            if (
+                block_m,
+                block_n,
+                block_k,
+                num_stages,
+                num_warps,
+                group_m,
+                matrix_instr_nonkdim,
+                kpack,
+                waves_per_eu,
+            ) not in used and (max_mm_configs is None or len(used) < max_mm_configs):
+                used.add(
+                    (
+                        block_m,
+                        block_n,
+                        block_k,
+                        num_stages,
+                        num_warps,
+                        group_m,
+                        matrix_instr_nonkdim,
+                        kpack,
+                        waves_per_eu,
                     )
-                    yield triton_config(
-                        BLOCK_M=block_m,
-                        BLOCK_N=block_n,
-                        BLOCK_K=block_k,
-                        num_stages=num_stages,
-                        num_warps=num_warps,
-                        GROUP_M=group_m,
-                        matrix_instr_nonkdim=matrix_instr_nonkdim,
-                        kpack=kpack,
-                        waves_per_eu=waves_per_eu,
-                    )
-            else:
-                if (block_m, block_n, block_k, num_stages, num_warps, 0) not in used:
-                    used.add((block_m, block_n, block_k, num_stages, num_warps, 0))
-                    yield triton_config(
-                        BLOCK_M=block_m,
-                        BLOCK_N=block_n,
-                        BLOCK_K=block_k,
-                        num_stages=num_stages,
-                        num_warps=num_warps,
-                        GROUP_M=group_m,
-                    )
+                )
+                yield triton_config(
+                    BLOCK_M=block_m,
+                    BLOCK_N=block_n,
+                    BLOCK_K=block_k,
+                    num_stages=num_stages,
+                    num_warps=num_warps,
+                    GROUP_M=group_m,
+                    matrix_instr_nonkdim=matrix_instr_nonkdim,
+                    kpack=kpack,
+                    waves_per_eu=waves_per_eu,
+                )
         else:
             if (block_m, block_n, block_k, num_stages, num_warps, 0) not in used and (
                 max_mm_configs is None or len(used) < max_mm_configs
@@ -205,6 +207,7 @@ def filtered_configs(
                     BLOCK_K=block_k,
                     num_stages=num_stages,
                     num_warps=num_warps,
+                    GROUP_M=group_m,
                 )
 
 
@@ -247,329 +250,324 @@ if torch.version.hip is None:
 else:
     rocm_num_stages = get_backend_num_stages()
     if inductor_config.max_autotune_gemm_search_space != "EXHAUSTIVE":
-        mm_kernel_configs = (
-            [
-                {
-                    "config": (128, 128, 32, rocm_num_stages, 4),
-                    "GROUP_M": 16,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (128, 128, 32, rocm_num_stages, 4),
-                    "GROUP_M": 16,
-                    "wpeu": 2,
-                    "cond": True,
-                },
-                {
-                    "config": (128, 128, 32, rocm_num_stages, 8),
-                    "GROUP_M": 16,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (128, 128, 64, rocm_num_stages, 4),
-                    "GROUP_M": 16,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (128, 128, 64, rocm_num_stages, 4),
-                    "GROUP_M": 16,
-                    "wpeu": 2,
-                    "cond": True,
-                },
-                {
-                    "config": (128, 128, 64, rocm_num_stages, 8),
-                    "GROUP_M": 16,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (128, 256, 32, rocm_num_stages, 4),
-                    "GROUP_M": 16,
-                    "wpeu": 2,
-                    "cond": True,
-                },
-                {
-                    "config": (128, 64, 16, rocm_num_stages, 4),
-                    "GROUP_M": 16,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (128, 64, 32, rocm_num_stages, 8),
-                    "GROUP_M": 16,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (128, 64, 32, rocm_num_stages, 4),
-                    "GROUP_M": 16,
-                    "wpeu": 2,
-                    "cond": True,
-                },
-                {
-                    "config": (128, 64, 64, rocm_num_stages, 4),
-                    "GROUP_M": 16,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (128, 64, 64, rocm_num_stages, 8),
-                    "GROUP_M": 16,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (16, 16, 256, rocm_num_stages, 4),
-                    "GROUP_M": 4,
-                    "wpeu": 2,
-                    "cond": True,
-                },
-                {
-                    "config": (256, 128, 32, rocm_num_stages, 8),
-                    "GROUP_M": 4,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (256, 128, 32, rocm_num_stages, 4),
-                    "GROUP_M": 4,
-                    "wpeu": 2,
-                    "cond": True,
-                },
-                {
-                    "config": (32, 16, 256, rocm_num_stages, 4),
-                    "GROUP_M": 4,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (32, 32, 128, rocm_num_stages, 4),
-                    "GROUP_M": 8,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (32, 64, 128, rocm_num_stages, 4),
-                    "GROUP_M": 8,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (32, 64, 64, rocm_num_stages, 4),
-                    "GROUP_M": 4,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (64, 128, 32, rocm_num_stages, 4),
-                    "GROUP_M": 4,
-                    "wpeu": 2,
-                    "cond": True,
-                },
-                {
-                    "config": (64, 128, 32, rocm_num_stages, 8),
-                    "GROUP_M": 4,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (64, 128, 64, rocm_num_stages, 4),
-                    "GROUP_M": 4,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (64, 16, 128, rocm_num_stages, 4),
-                    "GROUP_M": 8,
-                    "wpeu": 2,
-                    "cond": True,
-                },
-                {
-                    "config": (64, 16, 64, rocm_num_stages, 4),
-                    "GROUP_M": 8,
-                    "wpeu": 2,
-                    "cond": True,
-                },
-                {
-                    "config": (64, 64, 64, rocm_num_stages, 4),
-                    "GROUP_M": 4,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (64, 64, 128, rocm_num_stages, 4),
-                    "GROUP_M": 16,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (64, 128, 64, rocm_num_stages, 4),
-                    "GROUP_M": 4,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (128, 128, 128, rocm_num_stages, 8),
-                    "GROUP_M": 16,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (64, 128, 128, rocm_num_stages, 4),
-                    "GROUP_M": 4,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (128, 128, 64, rocm_num_stages, 4),
-                    "GROUP_M": 8,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (128, 128, 64, rocm_num_stages, 4),
-                    "GROUP_M": 8,
-                    "wpeu": 0,
-                    "mfma_size": 0,
-                    "kpack": 1,
-                    "cond": True,
-                },
-
-                {
-                    "config": (64, 64, 32, rocm_num_stages, 4),
-                    "GROUP_M": 8,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (256, 256, 64, rocm_num_stages, 8),
-                    "GROUP_M": 4,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (256, 128, 64, rocm_num_stages, 8),
-                    "GROUP_M": 4,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (128, 256, 64, rocm_num_stages, 8),
-                    "GROUP_M": 4,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (128, 64, 128, rocm_num_stages, 8),
-                    "GROUP_M": 8,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (32, 16, 128, rocm_num_stages, 4),
-                    "GROUP_M": 8,
-                    "wpeu": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (128, 32, 32, rocm_num_stages, 4),
-                    "GROUP_M": 8,
-                    "wpeu": 2,
-                    "cond": True,
-                },
-                {
-                    "config": (32, 256, 64, rocm_num_stages, 8),
-                    "GROUP_M": 8,
-                    "kpack": 1,
-                    "cond": True,
-                },
-                {
-                    "config": (64, 128, 64, rocm_num_stages, 8),
-                    "GROUP_M": 4,
-                    "kpack": 1,
-                    "cond": True,
-                },
-                {
-                    "config": (16, 64, 128, rocm_num_stages, 8),
-                    "GROUP_M": 8,
-                    "cond": True,
-                },
-                {
-                    "config": (128, 32, 16, rocm_num_stages, 4),
-                    "GROUP_M": 16,
-                    "kpack": 1,
-                    "wpeu": 2,
-                    "cond": True,
-                },
-                {
-                    "config": (128, 64, 128, rocm_num_stages, 4),
-                    "GROUP_M": 8,
-                    "kpack": 1,
-                    "cond": True,
-                },
-                {
-                    "config": (128, 32, 16, rocm_num_stages, 4),
-                    "GROUP_M": 16,
-                    "kpack": 1,
-                    "cond": True,
-                },
-                {
-                    "config": (64, 256, 64, rocm_num_stages, 8),
-                    "GROUP_M": 4,
-                    "kpack": 1,
-                    "mfma_size": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (64, 256, 16, rocm_num_stages, 4),
-                    "GROUP_M": 4,
-                    "kpack": 1,
-                    "cond": True,
-                },
-                {
-                    "config": (64, 32, 32, rocm_num_stages, 4),
-                    "GROUP_M": 8,
-                    "kpack": 2,
-                    "mfma_size": 0,
-                    "cond": True,
-                },
-                {
-                    "config": (128, 128, 128, rocm_num_stages, 8),
-                    "GROUP_M": 4,
-                    "cond": True,
-                },
-                {
-                    "config": (64, 256, 32, rocm_num_stages, 8),
-                    "GROUP_M": 4,
-                    "cond": True,
-                },
-            ]
-        )
-    else: 
-        mm_kernel_configs = (
-            [
-                {
-                    "config": (BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps),
-                    "GROUP_M": GROUP_M,
-                    "wpeu": waves_per_eu,
-                    "mfma_size": matrix_instr_nonkdim,
-                    "kpack": kpack,
-                    "cond": True,
-                }
-                for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
-                    [16, 32, 64, 128, 256], repeat=3
-                )
-                for num_stages in [2]
-                for num_warps in [4, 8]
-                for waves_per_eu in [0, 2]
-                for GROUP_M in [4, 8, 16]
-                for matrix_instr_nonkdim in [0, 16]
-                for kpack in [1, 2]
-            ]
-        )
+        mm_kernel_configs = [
+            {
+                "config": (128, 128, 32, rocm_num_stages, 4),
+                "GROUP_M": 16,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (128, 128, 32, rocm_num_stages, 4),
+                "GROUP_M": 16,
+                "wpeu": 2,
+                "cond": True,
+            },
+            {
+                "config": (128, 128, 32, rocm_num_stages, 8),
+                "GROUP_M": 16,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (128, 128, 64, rocm_num_stages, 4),
+                "GROUP_M": 16,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (128, 128, 64, rocm_num_stages, 4),
+                "GROUP_M": 16,
+                "wpeu": 2,
+                "cond": True,
+            },
+            {
+                "config": (128, 128, 64, rocm_num_stages, 8),
+                "GROUP_M": 16,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (128, 256, 32, rocm_num_stages, 4),
+                "GROUP_M": 16,
+                "wpeu": 2,
+                "cond": True,
+            },
+            {
+                "config": (128, 64, 16, rocm_num_stages, 4),
+                "GROUP_M": 16,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (128, 64, 32, rocm_num_stages, 8),
+                "GROUP_M": 16,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (128, 64, 32, rocm_num_stages, 4),
+                "GROUP_M": 16,
+                "wpeu": 2,
+                "cond": True,
+            },
+            {
+                "config": (128, 64, 64, rocm_num_stages, 4),
+                "GROUP_M": 16,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (128, 64, 64, rocm_num_stages, 8),
+                "GROUP_M": 16,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (16, 16, 256, rocm_num_stages, 4),
+                "GROUP_M": 4,
+                "wpeu": 2,
+                "cond": True,
+            },
+            {
+                "config": (256, 128, 32, rocm_num_stages, 8),
+                "GROUP_M": 4,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (256, 128, 32, rocm_num_stages, 4),
+                "GROUP_M": 4,
+                "wpeu": 2,
+                "cond": True,
+            },
+            {
+                "config": (32, 16, 256, rocm_num_stages, 4),
+                "GROUP_M": 4,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (32, 32, 128, rocm_num_stages, 4),
+                "GROUP_M": 8,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (32, 64, 128, rocm_num_stages, 4),
+                "GROUP_M": 8,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (32, 64, 64, rocm_num_stages, 4),
+                "GROUP_M": 4,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (64, 128, 32, rocm_num_stages, 4),
+                "GROUP_M": 4,
+                "wpeu": 2,
+                "cond": True,
+            },
+            {
+                "config": (64, 128, 32, rocm_num_stages, 8),
+                "GROUP_M": 4,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (64, 128, 64, rocm_num_stages, 4),
+                "GROUP_M": 4,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (64, 16, 128, rocm_num_stages, 4),
+                "GROUP_M": 8,
+                "wpeu": 2,
+                "cond": True,
+            },
+            {
+                "config": (64, 16, 64, rocm_num_stages, 4),
+                "GROUP_M": 8,
+                "wpeu": 2,
+                "cond": True,
+            },
+            {
+                "config": (64, 64, 64, rocm_num_stages, 4),
+                "GROUP_M": 4,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (64, 64, 128, rocm_num_stages, 4),
+                "GROUP_M": 16,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (64, 128, 64, rocm_num_stages, 4),
+                "GROUP_M": 4,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (128, 128, 128, rocm_num_stages, 8),
+                "GROUP_M": 16,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (64, 128, 128, rocm_num_stages, 4),
+                "GROUP_M": 4,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (128, 128, 64, rocm_num_stages, 4),
+                "GROUP_M": 8,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (128, 128, 64, rocm_num_stages, 4),
+                "GROUP_M": 8,
+                "wpeu": 0,
+                "mfma_size": 0,
+                "kpack": 1,
+                "cond": True,
+            },
+            {
+                "config": (64, 64, 32, rocm_num_stages, 4),
+                "GROUP_M": 8,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (256, 256, 64, rocm_num_stages, 8),
+                "GROUP_M": 4,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (256, 128, 64, rocm_num_stages, 8),
+                "GROUP_M": 4,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (128, 256, 64, rocm_num_stages, 8),
+                "GROUP_M": 4,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (128, 64, 128, rocm_num_stages, 8),
+                "GROUP_M": 8,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (32, 16, 128, rocm_num_stages, 4),
+                "GROUP_M": 8,
+                "wpeu": 0,
+                "cond": True,
+            },
+            {
+                "config": (128, 32, 32, rocm_num_stages, 4),
+                "GROUP_M": 8,
+                "wpeu": 2,
+                "cond": True,
+            },
+            {
+                "config": (32, 256, 64, rocm_num_stages, 8),
+                "GROUP_M": 8,
+                "kpack": 1,
+                "cond": True,
+            },
+            {
+                "config": (64, 128, 64, rocm_num_stages, 8),
+                "GROUP_M": 4,
+                "kpack": 1,
+                "cond": True,
+            },
+            {
+                "config": (16, 64, 128, rocm_num_stages, 8),
+                "GROUP_M": 8,
+                "cond": True,
+            },
+            {
+                "config": (128, 32, 16, rocm_num_stages, 4),
+                "GROUP_M": 16,
+                "kpack": 1,
+                "wpeu": 2,
+                "cond": True,
+            },
+            {
+                "config": (128, 64, 128, rocm_num_stages, 4),
+                "GROUP_M": 8,
+                "kpack": 1,
+                "cond": True,
+            },
+            {
+                "config": (128, 32, 16, rocm_num_stages, 4),
+                "GROUP_M": 16,
+                "kpack": 1,
+                "cond": True,
+            },
+            {
+                "config": (64, 256, 64, rocm_num_stages, 8),
+                "GROUP_M": 4,
+                "kpack": 1,
+                "mfma_size": 0,
+                "cond": True,
+            },
+            {
+                "config": (64, 256, 16, rocm_num_stages, 4),
+                "GROUP_M": 4,
+                "kpack": 1,
+                "cond": True,
+            },
+            {
+                "config": (64, 32, 32, rocm_num_stages, 4),
+                "GROUP_M": 8,
+                "kpack": 2,
+                "mfma_size": 0,
+                "cond": True,
+            },
+            {
+                "config": (128, 128, 128, rocm_num_stages, 8),
+                "GROUP_M": 4,
+                "cond": True,
+            },
+            {
+                "config": (64, 256, 32, rocm_num_stages, 8),
+                "GROUP_M": 4,
+                "cond": True,
+            },
+        ]
+    else:
+        mm_kernel_configs = [
+            {
+                "config": (BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps),
+                "GROUP_M": GROUP_M,
+                "wpeu": waves_per_eu,
+                "mfma_size": matrix_instr_nonkdim,
+                "kpack": kpack,
+                "cond": True,
+            }
+            for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
+                [16, 32, 64, 128, 256], repeat=3
+            )
+            for num_stages in [2]
+            for num_warps in [4, 8]
+            for waves_per_eu in [0, 2]
+            for GROUP_M in [4, 8, 16]
+            for matrix_instr_nonkdim in [0, 16]
+            for kpack in [1, 2]
+        ]
 
 
 # these are only used in tuned_mm when AutoHeuristic is enabled
@@ -614,9 +612,10 @@ mixed_mm_kernel_configs_small_m = [
 ]
 
 mixed_mm_kernel_configs = (
-    mm_kernel_configs + mixed_mm_kernel_configs_small_m
-    #if inductor_config.max_autotune_gemm_search_space != "EXHAUSTIVE"
-    #else mm_kernel_configs
+    mm_kernel_configs
+    + mixed_mm_kernel_configs_small_m
+    # if inductor_config.max_autotune_gemm_search_space != "EXHAUSTIVE"
+    # else mm_kernel_configs
 )
 
 persistent_mm_kernel_configs = [
@@ -745,9 +744,13 @@ mm_platform_configs, mm_args = _extract_configs(mm_kernel_configs)
 extra_mm_platform_configs, extra_mm_args = _extract_configs(extra_mm_kernel_configs)
 int8_mm_platform_configs, int8_mm_args = _extract_configs(int8_mm_kernel_configs)
 mixed_mm_platform_configs, mixed_mm_args = _extract_configs(mixed_mm_kernel_configs)
-persistent_mm_platform_configs, persistent_mm_args = _extract_configs(persistent_mm_kernel_configs)
+persistent_mm_platform_configs, persistent_mm_args = _extract_configs(
+    persistent_mm_kernel_configs
+)
 scaled_mm_platform_configs, scaled_mm_args = _extract_configs(scaled_mm_kernel_configs)
-scaled_persistent_mm_platform_configs, scaled_persistent_mm_args = _extract_configs(scaled_persistent_mm_kernel_configs)
+scaled_persistent_mm_platform_configs, scaled_persistent_mm_args = _extract_configs(
+    scaled_persistent_mm_kernel_configs
+)
 
 # On ROCm convert num_stages to improve performance
 # This can be removed when ROCm specific implementations introduced
@@ -757,7 +760,9 @@ if torch.version.hip:
     mixed_mm_configs = build_rocm_gemm_configs(mixed_mm_platform_configs)
     persistent_mm_configs = build_rocm_gemm_configs(persistent_mm_platform_configs)
     scaled_mm_configs = build_rocm_gemm_configs(scaled_mm_platform_configs)
-    scaled_persistent_mm_configs = build_rocm_gemm_configs(scaled_persistent_mm_platform_configs)
+    scaled_persistent_mm_configs = build_rocm_gemm_configs(
+        scaled_persistent_mm_platform_configs
+    )
 
 mm_configs = functools.partial(
     filtered_configs,
@@ -786,7 +791,7 @@ mixed_mm_configs = functools.partial(
 persistent_mm_configs = functools.partial(
     filtered_configs,
     configs=persistent_mm_platform_configs,
-    extra_args=persistent_mm_args
+    extra_args=persistent_mm_args,
 )
 
 scaled_mm_configs = functools.partial(
